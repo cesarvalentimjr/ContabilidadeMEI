@@ -17,8 +17,6 @@ def get_connection():
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
-    
-    # Tabela de usuários
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,8 +25,6 @@ def init_db():
         senha TEXT NOT NULL
     )
     """)
-    
-    # Tabela de transações
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS transacoes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,11 +36,9 @@ def init_db():
         FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
     )
     """)
-    
     conn.commit()
     conn.close()
 
-# Inicializa o banco
 init_db()
 
 # ---------------------------
@@ -129,64 +123,89 @@ def calcular_fluxo(usuario_id):
 # ---------------------------
 st.title("📊 Contabilidade MEI")
 
-# Menu lateral
-pagina = st.sidebar.selectbox("Menu", ["Login", "Cadastrar"])
+# Inicializa o estado de sessão
+if "usuario" not in st.session_state:
+    st.session_state.usuario = None
 
-if pagina == "Cadastrar":
+# ---------------------------
+# Tela de cadastro
+# ---------------------------
+def tela_cadastro():
     st.subheader("Cadastro de Usuário")
-    nome = st.text_input("Nome")
-    email = st.text_input("Email")
-    senha = st.text_input("Senha", type="password")
-    if st.button("Cadastrar"):
+    nome = st.text_input("Nome", key="cad_nome")
+    email = st.text_input("Email", key="cad_email")
+    senha = st.text_input("Senha", type="password", key="cad_senha")
+    if st.button("Cadastrar", key="btn_cadastrar"):
         if cadastrar_usuario(email, nome, senha):
             st.success("Usuário cadastrado com sucesso! Faça login na aba lateral.")
         else:
             st.error("Email já cadastrado!")
 
-elif pagina == "Login":
+# ---------------------------
+# Tela de login
+# ---------------------------
+def tela_login():
     st.subheader("Login")
-    email = st.text_input("Email")
-    senha = st.text_input("Senha", type="password")
-    if st.button("Login"):
+    email = st.text_input("Email", key="login_email")
+    senha = st.text_input("Senha", type="password", key="login_senha")
+    if st.button("Login", key="btn_login"):
         user = login_usuario(email, senha)
         if user:
+            st.session_state.usuario = user
             st.success(f"Bem-vindo, {user['nome']}!")
-
-            # ---------------------------
-            # Registrar nova transação
-            # ---------------------------
-            st.subheader("Registrar nova transação")
-            descricao = st.text_input("Descrição")
-            valor = st.number_input("Valor", min_value=0.0, format="%.2f")
-            tipo = st.selectbox("Tipo", ["entrada", "saida"])
-            data = st.date_input("Data", datetime.today())
-            if st.button("Registrar"):
-                registrar_transacao(user["id"], descricao, valor, tipo, data.strftime("%Y-%m-%d"))
-                st.success("Transação registrada!")
-
-            # ---------------------------
-            # Histórico de transações
-            # ---------------------------
-            st.subheader("Histórico de transações")
-            transacoes = listar_transacoes(user["id"])
-            if transacoes:
-                for t in transacoes:
-                    st.write(f"{t['data']} - {t['descricao']} - {t['tipo']} - R${t['valor']:.2f}")
-            else:
-                st.info("Nenhuma transação registrada.")
-
-            # ---------------------------
-            # Relatório de fluxo de caixa
-            # ---------------------------
-            st.subheader("Resumo financeiro")
-            total_entrada, total_saida, saldo = calcular_fluxo(user["id"])
-            st.write(f"Total de entradas: R${total_entrada:.2f}")
-            st.write(f"Total de saídas: R${total_saida:.2f}")
-            st.write(f"Saldo atual: R${saldo:.2f}")
-
         else:
             st.error("Email ou senha incorretos!")
 
+# ---------------------------
+# Tela principal após login
+# ---------------------------
+def tela_principal():
+    st.subheader("Registrar nova transação")
+    descricao = st.text_input("Descrição", key="trans_desc")
+    valor = st.number_input("Valor", min_value=0.0, format="%.2f", key="trans_valor")
+    tipo = st.selectbox("Tipo", ["entrada", "saida"], key="trans_tipo")
+    data = st.date_input("Data", datetime.today(), key="trans_data")
+    if st.button("Registrar transação", key="btn_registrar_trans"):
+        if descricao and valor > 0:
+            registrar_transacao(
+                st.session_state.usuario["id"],
+                descricao,
+                valor,
+                tipo,
+                data.strftime("%Y-%m-%d")
+            )
+            st.success("Transação registrada!")
+        else:
+            st.error("Preencha descrição e valor corretamente.")
 
+    st.subheader("Histórico de transações")
+    transacoes = listar_transacoes(st.session_state.usuario["id"])
+    if transacoes:
+        for t in transacoes:
+            st.write(f"{t['data']} - {t['descricao']} - {t['tipo']} - R${t['valor']:.2f}")
+    else:
+        st.info("Nenhuma transação registrada.")
+
+    st.subheader("Resumo financeiro")
+    total_entrada, total_saida, saldo = calcular_fluxo(st.session_state.usuario["id"])
+    st.write(f"Total de entradas: R${total_entrada:.2f}")
+    st.write(f"Total de saídas: R${total_saida:.2f}")
+    st.write(f"Saldo atual: R${saldo:.2f}")
+
+    if st.button("Logout"):
+        st.session_state.usuario = None
+        st.experimental_rerun()
+
+# ---------------------------
+# Menu lateral
+# ---------------------------
+if st.session_state.usuario is None:
+    menu = st.sidebar.selectbox("Menu", ["Login", "Cadastrar"])
+    if menu == "Cadastrar":
+        tela_cadastro()
+    else:
+        tela_login()
+else:
+    tela_principal()
 
 
