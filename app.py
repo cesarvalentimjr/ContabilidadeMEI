@@ -262,26 +262,31 @@ def tela_login():
             st.error("Email ou senha incorretos!")
 
 # ---------------------------
-# Tela principal
+# Tela principal (corrigida)
 # ---------------------------
 def tela_principal():
+    usuario = st.session_state.usuario
+
+    if not usuario:
+        st.warning("Usuário não logado. Por favor, faça login.")
+        st.stop()
+
     tabs = ["Dashboard", "Registrar Transação"]
-    if st.session_state.usuario["admin"]:
+    if usuario.get("admin", 0):
         tabs += ["Categorias", "Usuários"]
+
     selected_tab = st.tabs(tabs)
 
-    # Dashboard
     with selected_tab[0]:
-        dashboard_financeiro(st.session_state.usuario["id"])
+        dashboard_financeiro(usuario["id"])
 
-    # Registrar transação
     with selected_tab[1]:
         st.subheader("Registrar nova transação")
-        col1, col2 = st.columns([3,1])
+        col1, col2 = st.columns([3, 1])
         with col1:
             descricao = st.text_input("Descrição", key="trans_desc")
             valor = st.number_input("Valor", min_value=0.0, format="%.2f", key="trans_valor")
-            tipo = st.selectbox("Tipo", ["entrada","saida"], key="trans_tipo")
+            tipo = st.selectbox("Tipo", ["entrada", "saida"], key="trans_tipo")
             categorias = listar_categorias(tipo)
             if categorias:
                 cat_dict = {c['nome']: c['id'] for c in categorias}
@@ -292,24 +297,20 @@ def tela_principal():
                 categoria_id = None
             data = st.date_input("Data", datetime.today(), key="trans_data")
         with col2:
-            st.write("")  # espaço
+            st.write("")
             if st.button("Registrar", key="btn_registrar_trans"):
                 if descricao and valor > 0 and categoria_id:
-                    registrar_transacao(
-                        st.session_state.usuario["id"], descricao, valor, tipo, categoria_id, data.strftime("%Y-%m-%d")
-                    )
+                    registrar_transacao(usuario["id"], descricao, valor, tipo, categoria_id, data.strftime("%Y-%m-%d"))
                     st.success("✅ Transação registrada!")
                 else:
                     st.error("Preencha todos os campos corretamente.")
 
-    # Admin
-    if st.session_state.usuario["admin"]:
-        # Categorias
+    if usuario.get("admin", 0):
         with selected_tab[2]:
             st.subheader("Gerenciar Categorias")
             col1, col2 = st.columns(2)
             with col1:
-                tipo_cat = st.selectbox("Tipo de Categoria", ["entrada","saida"], key="adm_tipo_cat")
+                tipo_cat = st.selectbox("Tipo de Categoria", ["entrada", "saida"], key="adm_tipo_cat")
             with col2:
                 nova_cat = st.text_input("Nova Categoria", key="adm_nova_cat")
             if st.button("Adicionar Categoria", key="btn_add_cat"):
@@ -319,7 +320,6 @@ def tela_principal():
                 else:
                     st.error("Digite o nome da categoria.")
 
-        # Usuários
         with selected_tab[3]:
             st.subheader("Usuários cadastrados")
             conn = get_connection()
@@ -338,12 +338,10 @@ def tela_principal():
 # Menu lateral
 # ---------------------------
 if st.session_state.usuario is None:
-    menu = st.sidebar.selectbox("Menu", ["Login","Cadastrar"])
+    menu = st.sidebar.selectbox("Menu", ["Login", "Cadastrar"])
     if menu == "Cadastrar":
         tela_cadastro()
     else:
         tela_login()
 else:
     tela_principal()
-
-
