@@ -1,6 +1,8 @@
 import streamlit as st
 import sqlite3
 from datetime import datetime
+import hashlib
+import os
 
 # ---------------------------
 # Banco de dados SQLite
@@ -46,15 +48,30 @@ def init_db():
 init_db()
 
 # ---------------------------
+# Funções de hash de senha
+# ---------------------------
+def hash_senha(senha):
+    salt = os.urandom(16)
+    hash_bytes = hashlib.pbkdf2_hmac('sha256', senha.encode(), salt, 100000)
+    return salt.hex() + hash_bytes.hex()
+
+def verificar_senha(senha_digitada, hash_armazenado):
+    salt = bytes.fromhex(hash_armazenado[:32])
+    hash_armazenado_bytes = bytes.fromhex(hash_armazenado[32:])
+    hash_digitado = hashlib.pbkdf2_hmac('sha256', senha_digitada.encode(), salt, 100000)
+    return hash_digitado == hash_armazenado_bytes
+
+# ---------------------------
 # Funções de usuários
 # ---------------------------
 def cadastrar_usuario(email, nome, senha):
     conn = get_connection()
     cursor = conn.cursor()
     try:
+        senha_hash = hash_senha(senha)
         cursor.execute(
             "INSERT INTO usuarios (email, nome, senha) VALUES (?, ?, ?)",
-            (email, nome, senha)
+            (email, nome, senha_hash)
         )
         conn.commit()
         return True
@@ -67,12 +84,14 @@ def login_usuario(email, senha):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT * FROM usuarios WHERE email = ? AND senha = ?",
-        (email, senha)
+        "SELECT * FROM usuarios WHERE email = ?",
+        (email,)
     )
     user = cursor.fetchone()
     conn.close()
-    return user
+    if user and verificar_senha(senha, user["senha"]):
+        return user
+    return None
 
 # ---------------------------
 # Funções de transações
@@ -167,5 +186,7 @@ elif pagina == "Login":
 
         else:
             st.error("Email ou senha incorretos!")
+
+
 
 
