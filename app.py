@@ -246,13 +246,12 @@ def tela_login():
         user = login_usuario(email, senha)
         if user:
             st.session_state.usuario = user
-            st.success(f"Bem-vindo, {user['nome']}!")
-            st.experimental_rerun()  # Força atualizar app e chamar tela_principal
+            st.session_state.logado = True  # <-- controle de login
         else:
             st.error("Email ou senha incorretos!")
 
 # ---------------------------
-# Tela principal (corrigida)
+# Tela principal
 # ---------------------------
 def tela_principal():
     usuario = st.session_state.usuario
@@ -322,7 +321,7 @@ def tela_principal():
 
     if st.button("Logout"):
         st.session_state.usuario = None
-        st.experimental_rerun()
+        st.session_state.logado = False
 
 # ---------------------------
 # Configuração inicial Streamlit
@@ -330,19 +329,21 @@ def tela_principal():
 st.set_page_config(page_title="Contabilidade MEI", layout="wide")
 st.title("📊 Contabilidade MEI - Dashboard Financeiro")
 
+# Inicialização de variáveis de sessão
 if "usuario" not in st.session_state:
     st.session_state.usuario = None
+if "logado" not in st.session_state:
+    st.session_state.logado = False
 
 # ---------------------------
-# Menu lateral
+# Fluxo principal
 # ---------------------------
-if st.session_state.usuario is None:
+if st.session_state.logado:
+    tela_principal()
+else:
     menu = st.sidebar.selectbox("Menu", ["Login", "Cadastrar"])
     if menu == "Cadastrar":
         tela_cadastro()
     else:
         tela_login()
-else:
-    tela_principal()
-
 
