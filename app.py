@@ -123,9 +123,11 @@ def calcular_fluxo(usuario_id):
 # ---------------------------
 st.title("📊 Contabilidade MEI")
 
-# Inicializa o estado de sessão
+# Inicializa estado de sessão
 if "usuario" not in st.session_state:
     st.session_state.usuario = None
+
+ADMIN_EMAIL = "admin@seuemail.com"  # email do admin
 
 # ---------------------------
 # Tela de cadastro
@@ -192,6 +194,19 @@ def tela_principal():
     st.write(f"Total de saídas: R${total_saida:.2f}")
     st.write(f"Saldo atual: R${saldo:.2f}")
 
+    if st.session_state.usuario["email"] == ADMIN_EMAIL:
+        st.subheader("Admin: Usuários cadastrados")
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, nome, email FROM usuarios")
+        rows = cursor.fetchall()
+        conn.close()
+        if rows:
+            for u in rows:
+                st.write(f"ID: {u['id']} | Nome: {u['nome']} | Email: {u['email']}")
+        else:
+            st.info("Nenhum usuário cadastrado.")
+
     if st.button("Logout"):
         st.session_state.usuario = None
         st.experimental_rerun()
@@ -207,5 +222,7 @@ if st.session_state.usuario is None:
         tela_login()
 else:
     tela_principal()
+
+
 
 
