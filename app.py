@@ -187,27 +187,25 @@ def dashboard_financeiro(usuario_id):
     if categoria_filter:
         df_filtered = df_filtered[df_filtered['categoria'].isin(categoria_filter)]
 
-    # Cards de resumo com cores e emojis
+    # Cards de resumo
     total_entrada = df_filtered[df_filtered['tipo']=='entrada']['valor'].sum()
     total_saida = df_filtered[df_filtered['tipo']=='saida']['valor'].sum()
     saldo = total_entrada - total_saida
 
     st.subheader("Resumo Financeiro")
     col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Entradas", f"R$ {total_entrada:.2f}", delta=None)
-    col2.metric("📉 Saídas", f"R$ {total_saida:.2f}", delta=None)
-    col3.metric("📈 Saldo", f"R$ {saldo:.2f}", delta=None)
+    col1.metric("💰 Entradas", f"R$ {total_entrada:.2f}")
+    col2.metric("📉 Saídas", f"R$ {total_saida:.2f}")
+    col3.metric("📈 Saldo", f"R$ {saldo:.2f}")
 
-    # Gráficos em colunas
+    # Gráficos
     st.subheader("Gráficos")
     col1, col2 = st.columns(2)
-    # Entradas e saídas por mês
     df_mes = df_filtered.groupby([df_filtered['data'].dt.to_period('M'), 'tipo'])['valor'].sum().reset_index()
     df_mes['data'] = df_mes['data'].dt.to_timestamp()
     fig = px.bar(df_mes, x='data', y='valor', color='tipo', barmode='group', title="Entradas e Saídas por Mês")
     col1.plotly_chart(fig, use_container_width=True)
 
-    # Distribuição por categoria
     df_cat = df_filtered.groupby(['categoria','tipo'])['valor'].sum().reset_index()
     fig2 = px.pie(df_cat, names='categoria', values='valor', title="Distribuição por Categoria")
     col2.plotly_chart(fig2, use_container_width=True)
@@ -217,15 +215,6 @@ def dashboard_financeiro(usuario_id):
     st.dataframe(df_filtered[['data','descricao','categoria','tipo','valor']].sort_values(by='data', ascending=False))
     csv = df_filtered.to_csv(index=False).encode('utf-8')
     st.download_button("Exportar CSV", csv, "transacoes.csv", "text/csv")
-
-# ---------------------------
-# Interface Streamlit
-# ---------------------------
-st.set_page_config(page_title="Contabilidade MEI", layout="wide")
-st.title("📊 Contabilidade MEI - Dashboard Financeiro")
-
-if "usuario" not in st.session_state:
-    st.session_state.usuario = None
 
 # ---------------------------
 # Tela de cadastro
@@ -258,6 +247,7 @@ def tela_login():
         if user:
             st.session_state.usuario = user
             st.success(f"Bem-vindo, {user['nome']}!")
+            st.experimental_rerun()  # Força atualizar app e chamar tela_principal
         else:
             st.error("Email ou senha incorretos!")
 
@@ -335,6 +325,15 @@ def tela_principal():
         st.experimental_rerun()
 
 # ---------------------------
+# Configuração inicial Streamlit
+# ---------------------------
+st.set_page_config(page_title="Contabilidade MEI", layout="wide")
+st.title("📊 Contabilidade MEI - Dashboard Financeiro")
+
+if "usuario" not in st.session_state:
+    st.session_state.usuario = None
+
+# ---------------------------
 # Menu lateral
 # ---------------------------
 if st.session_state.usuario is None:
@@ -345,3 +344,5 @@ if st.session_state.usuario is None:
         tela_login()
 else:
     tela_principal()
+
+
