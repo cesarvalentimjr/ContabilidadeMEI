@@ -99,7 +99,7 @@ def login_usuario(email, senha):
     user = cursor.fetchone()
     conn.close()
     if user and verificar_senha(senha, user["senha"]):
-        return user
+        return dict(user)  # <-- converte para dicionário
     return None
 
 # ---------------------------
@@ -245,8 +245,8 @@ def tela_login():
     if st.button("Login", key="btn_login"):
         user = login_usuario(email, senha)
         if user:
-            st.session_state.usuario = user
-            st.session_state.logado = True  # <-- controle de login
+            st.session_state.usuario = user  # já é dicionário
+            st.session_state.logado = True
         else:
             st.error("Email ou senha incorretos!")
 
@@ -316,7 +316,7 @@ def tela_principal():
             cursor.execute("SELECT id, nome, email, admin FROM usuarios")
             rows = cursor.fetchall()
             conn.close()
-            df_users = pd.DataFrame(rows)
+            df_users = pd.DataFrame([dict(r) for r in rows])
             st.dataframe(df_users)
 
     if st.button("Logout"):
@@ -346,4 +346,5 @@ else:
         tela_cadastro()
     else:
         tela_login()
+
 
