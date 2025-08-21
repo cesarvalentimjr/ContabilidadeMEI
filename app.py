@@ -1,350 +1,165 @@
 import streamlit as st
-import sqlite3
-from datetime import datetime
-import hashlib
-import os
 import pandas as pd
+import gspread
+from google.oauth2.service_account import Credentials
+from passlib.hash import pbkdf2_sha256
 import plotly.express as px
+from datetime import datetime
 
-# ---------------------------
-# Banco de dados SQLite
-# ---------------------------
-DB_FILE = "meu_app.db"
 
-def get_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def init_db():
-    conn = get_connection()
-    cursor = conn.cursor()
-    # Usuários
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE NOT NULL,
-        nome TEXT NOT NULL,
-        senha TEXT NOT NULL,
-        admin INTEGER DEFAULT 0
+# ============================
+# 🔑 Conexão com Google Sheets
+# ============================
+@st.cache_resource
+def connect_gsheets():
+    creds = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=["https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"]
     )
-    """)
-    # Categorias
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS categorias (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        tipo TEXT CHECK(tipo IN ('entrada','saida')) NOT NULL
-    )
-    """)
-    # Transações
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS transacoes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario_id INTEGER NOT NULL,
-        descricao TEXT,
-        valor REAL NOT NULL,
-        tipo TEXT CHECK(tipo IN ('entrada','saida')) NOT NULL,
-        categoria_id INTEGER,
-        data TEXT NOT NULL,
-        FOREIGN KEY(usuario_id) REFERENCES usuarios(id),
-        FOREIGN KEY(categoria_id) REFERENCES categorias(id)
-    )
-    """)
-    conn.commit()
-    conn.close()
+    client = gspread.authorize(creds)
+    # Coloque aqui o ID da sua planilha
+    SHEET_ID = "1IvojPJOmgwEl6oySfKTl-5jC7TJfYrpFtwWptHl1Y4w"
+    return client.open_by_key(SHEET_ID)
 
-init_db()
 
-# ---------------------------
-# Hash de senha
-# ---------------------------
-def hash_senha(senha):
-    salt = os.urandom(16)
-    hash_bytes = hashlib.pbkdf2_hmac('sha256', senha.encode(), salt, 100000)
-    return salt.hex() + hash_bytes.hex()
+sh = connect_gsheets()
+ws_usuarios = sh.worksheet("usuarios")
+ws_transacoes = sh.worksheet("transacoes")
+ws_categorias = sh.worksheet("categorias")
 
-def verificar_senha(senha_digitada, hash_armazenado):
-    salt = bytes.fromhex(hash_armazenado[:32])
-    hash_armazenado_bytes = bytes.fromhex(hash_armazenado[32:])
-    hash_digitado = hashlib.pbkdf2_hmac('sha256', senha_digitada.encode(), salt, 100000)
-    return hash_digitado == hash_armazenado_bytes
 
-# ---------------------------
-# Funções de usuários
-# ---------------------------
-def cadastrar_usuario(email, nome, senha, admin=0):
-    conn = get_connection()
-    cursor = conn.cursor()
-    try:
-        senha_hash = hash_senha(senha)
-        cursor.execute(
-            "INSERT INTO usuarios (email, nome, senha, admin) VALUES (?, ?, ?, ?)",
-            (email, nome, senha_hash, admin)
-        )
-        conn.commit()
-        return True
-    except sqlite3.IntegrityError:
+# =====================================
+# 📌 Funções de manipulação de dados
+# =====================================
+def listar_usuarios():
+    dados = ws_usuarios.get_all_records()
+    return pd.DataFrame(dados)
+
+
+def adicionar_usuario(email, senha, admin=0):
+    usuarios = listar_usuarios()
+    if not usuarios.empty and email in usuarios["email"].values:
         return False
-    finally:
-        conn.close()
+    senha_hash = pbkdf2_sha256.hash(senha)
+    nova_linha = [len(usuarios) + 1, email, senha_hash, admin]
+    ws_usuarios.append_row(nova_linha)
+    return True
 
-def login_usuario(email, senha):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT * FROM usuarios WHERE email = ?",
-        (email,)
-    )
-    user = cursor.fetchone()
-    conn.close()
-    if user and verificar_senha(senha, user["senha"]):
-        return dict(user)  # <-- converte para dicionário
+
+def autenticar(email, senha):
+    usuarios = listar_usuarios()
+    if usuarios.empty:
+        return None
+    usuario = usuarios.loc[usuarios["email"] == email]
+    if usuario.empty:
+        return None
+    usuario = usuario.iloc[0]
+    if pbkdf2_sha256.verify(senha, usuario["senha"]):
+        return usuario.to_dict()
     return None
 
-# ---------------------------
-# Funções de categorias
-# ---------------------------
-def listar_categorias(tipo=None):
-    conn = get_connection()
-    cursor = conn.cursor()
-    if tipo:
-        cursor.execute("SELECT * FROM categorias WHERE tipo = ?", (tipo,))
-    else:
-        cursor.execute("SELECT * FROM categorias")
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
 
-def adicionar_categoria(nome, tipo):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO categorias (nome, tipo) VALUES (?, ?)", (nome, tipo))
-    conn.commit()
-    conn.close()
+def listar_categorias():
+    dados = ws_categorias.get_all_records()
+    return [d["nome"] for d in dados]
 
-# ---------------------------
-# Funções de transações
-# ---------------------------
-def registrar_transacao(usuario_id, descricao, valor, tipo, categoria_id, data):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO transacoes (usuario_id, descricao, valor, tipo, categoria_id, data) VALUES (?, ?, ?, ?, ?, ?)",
-        (usuario_id, descricao, valor, tipo, categoria_id, data)
-    )
-    conn.commit()
-    conn.close()
 
 def listar_transacoes(usuario_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """SELECT t.id, t.descricao, t.valor, t.tipo, t.data, c.nome AS categoria
-           FROM transacoes t
-           LEFT JOIN categorias c ON t.categoria_id = c.id
-           WHERE t.usuario_id = ?
-           ORDER BY t.data DESC""",
-        (usuario_id,)
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
+    dados = ws_transacoes.get_all_records()
+    if not dados:
+        return pd.DataFrame()
+    df = pd.DataFrame(dados)
+    return df[df["usuario_id"] == usuario_id]
 
-# ---------------------------
-# Dashboard com layout visual
-# ---------------------------
-def dashboard_financeiro(usuario_id):
-    transacoes = listar_transacoes(usuario_id)
-    if not transacoes:
-        st.info("Nenhuma transação registrada.")
+
+def adicionar_transacao(usuario_id, descricao, valor, tipo, categoria, data):
+    transacoes = ws_transacoes.get_all_records()
+    nova_linha = [
+        len(transacoes) + 1,
+        usuario_id,
+        descricao,
+        float(valor),
+        tipo,
+        categoria,
+        data.strftime("%Y-%m-%d")
+    ]
+    ws_transacoes.append_row(nova_linha)
+
+
+# =====================================
+# 🎨 Layout das telas
+# =====================================
+def tela_login():
+    st.title("📊 Contabilidade MEI - Login")
+
+    email = st.text_input("E-mail")
+    senha = st.text_input("Senha", type="password")
+
+    if st.button("Entrar"):
+        usuario = autenticar(email, senha)
+        if usuario:
+            st.session_state.usuario = usuario
+            st.experimental_rerun()
+        else:
+            st.error("E-mail ou senha inválidos.")
+
+
+def dashboard_financeiro(usuario):
+    st.subheader("📊 Dashboard Financeiro")
+
+    transacoes = listar_transacoes(usuario["id"])
+    if transacoes.empty:
+        st.info("Nenhuma transação registrada ainda.")
         return
 
-    df = pd.DataFrame(transacoes)
-    df['data'] = pd.to_datetime(df['data'])
+    saldo = transacoes.apply(lambda x: x["valor"] if x["tipo"] == "Receita" else -x["valor"], axis=1).sum()
+    st.metric("💰 Saldo Atual", f"R$ {saldo:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
 
-    # Filtros
-    st.subheader("Filtros")
-    min_data = df['data'].min()
-    max_data = df['data'].max()
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        start_date = st.date_input("Data Inicial", min_data)
-    with col2:
-        end_date = st.date_input("Data Final", max_data)
-    with col3:
-        tipo_filter = st.selectbox("Tipo", ["todos","entrada","saida"])
-    
-    categorias = list(df['categoria'].dropna().unique())
-    categoria_filter = st.multiselect("Categorias", categorias, default=categorias)
+    fig = px.bar(
+        transacoes,
+        x="categoria",
+        y="valor",
+        color="tipo",
+        title="Receitas e Despesas por Categoria"
+    )
+    st.plotly_chart(fig)
 
-    df_filtered = df[
-        (df['data'] >= pd.to_datetime(start_date)) &
-        (df['data'] <= pd.to_datetime(end_date))
-    ]
-    if tipo_filter != "todos":
-        df_filtered = df_filtered[df_filtered['tipo'] == tipo_filter]
-    if categoria_filter:
-        df_filtered = df_filtered[df_filtered['categoria'].isin(categoria_filter)]
 
-    # Cards de resumo
-    total_entrada = df_filtered[df_filtered['tipo']=='entrada']['valor'].sum()
-    total_saida = df_filtered[df_filtered['tipo']=='saida']['valor'].sum()
-    saldo = total_entrada - total_saida
+def tela_transacoes(usuario):
+    st.subheader("➕ Nova Transação")
 
-    st.subheader("Resumo Financeiro")
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Entradas", f"R$ {total_entrada:.2f}")
-    col2.metric("📉 Saídas", f"R$ {total_saida:.2f}")
-    col3.metric("📈 Saldo", f"R$ {saldo:.2f}")
+    descricao = st.text_input("Descrição")
+    valor = st.number_input("Valor", min_value=0.0, step=0.01)
+    tipo = st.selectbox("Tipo", ["Receita", "Despesa"])
+    categoria = st.selectbox("Categoria", listar_categorias())
+    data = st.date_input("Data", datetime.today())
 
-    # Gráficos
-    st.subheader("Gráficos")
-    col1, col2 = st.columns(2)
-    df_mes = df_filtered.groupby([df_filtered['data'].dt.to_period('M'), 'tipo'])['valor'].sum().reset_index()
-    df_mes['data'] = df_mes['data'].dt.to_timestamp()
-    fig = px.bar(df_mes, x='data', y='valor', color='tipo', barmode='group', title="Entradas e Saídas por Mês")
-    col1.plotly_chart(fig, use_container_width=True)
+    if st.button("Salvar"):
+        adicionar_transacao(usuario["id"], descricao, valor, tipo, categoria, data)
+        st.success("Transação adicionada com sucesso!")
+        st.experimental_rerun()
 
-    df_cat = df_filtered.groupby(['categoria','tipo'])['valor'].sum().reset_index()
-    fig2 = px.pie(df_cat, names='categoria', values='valor', title="Distribuição por Categoria")
-    col2.plotly_chart(fig2, use_container_width=True)
 
-    # Tabela detalhada
-    st.subheader("Transações Detalhadas")
-    st.dataframe(df_filtered[['data','descricao','categoria','tipo','valor']].sort_values(by='data', ascending=False))
-    csv = df_filtered.to_csv(index=False).encode('utf-8')
-    st.download_button("Exportar CSV", csv, "transacoes.csv", "text/csv")
-
-# ---------------------------
-# Tela de cadastro
-# ---------------------------
-def tela_cadastro():
-    st.subheader("Cadastro de Usuário")
-    col1, col2 = st.columns(2)
-    with col1:
-        nome = st.text_input("Nome", key="cad_nome")
-        email = st.text_input("Email", key="cad_email")
-    with col2:
-        senha = st.text_input("Senha", type="password", key="cad_senha")
-        admin_checkbox = st.checkbox("Cadastrar como admin", key="cad_admin")
-    if st.button("Cadastrar", key="btn_cadastrar"):
-        admin_val = 1 if admin_checkbox else 0
-        if cadastrar_usuario(email, nome, senha, admin_val):
-            st.success("Usuário cadastrado com sucesso! Faça login na aba lateral.")
-        else:
-            st.error("Email já cadastrado!")
-
-# ---------------------------
-# Tela de login
-# ---------------------------
-def tela_login():
-    st.subheader("Login")
-    email = st.text_input("Email", key="login_email")
-    senha = st.text_input("Senha", type="password", key="login_senha")
-    if st.button("Login", key="btn_login"):
-        user = login_usuario(email, senha)
-        if user:
-            st.session_state.usuario = user  # já é dicionário
-            st.session_state.logado = True
-        else:
-            st.error("Email ou senha incorretos!")
-
-# ---------------------------
-# Tela principal
-# ---------------------------
 def tela_principal():
     usuario = st.session_state.usuario
+    st.sidebar.title(f"Bem-vindo, {usuario['email']}")
 
-    if not usuario:
-        st.warning("Usuário não logado. Por favor, faça login.")
-        st.stop()
+    menu = st.sidebar.radio("Menu", ["Dashboard", "Transações", "Sair"])
 
-    tabs = ["Dashboard", "Registrar Transação"]
-    if usuario.get("admin", 0):
-        tabs += ["Categorias", "Usuários"]
+    if menu == "Dashboard":
+        dashboard_financeiro(usuario)
+    elif menu == "Transações":
+        tela_transacoes(usuario)
+    elif menu == "Sair":
+        st.session_state.clear()
+        st.experimental_rerun()
 
-    selected_tab = st.tabs(tabs)
 
-    with selected_tab[0]:
-        dashboard_financeiro(usuario["id"])
-
-    with selected_tab[1]:
-        st.subheader("Registrar nova transação")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            descricao = st.text_input("Descrição", key="trans_desc")
-            valor = st.number_input("Valor", min_value=0.0, format="%.2f", key="trans_valor")
-            tipo = st.selectbox("Tipo", ["entrada", "saida"], key="trans_tipo")
-            categorias = listar_categorias(tipo)
-            if categorias:
-                cat_dict = {c['nome']: c['id'] for c in categorias}
-                categoria_selecionada = st.selectbox("Categoria", list(cat_dict.keys()), key="trans_cat")
-                categoria_id = cat_dict[categoria_selecionada]
-            else:
-                st.warning("Nenhuma categoria cadastrada para este tipo.")
-                categoria_id = None
-            data = st.date_input("Data", datetime.today(), key="trans_data")
-        with col2:
-            st.write("")
-            if st.button("Registrar", key="btn_registrar_trans"):
-                if descricao and valor > 0 and categoria_id:
-                    registrar_transacao(usuario["id"], descricao, valor, tipo, categoria_id, data.strftime("%Y-%m-%d"))
-                    st.success("✅ Transação registrada!")
-                else:
-                    st.error("Preencha todos os campos corretamente.")
-
-    if usuario.get("admin", 0):
-        with selected_tab[2]:
-            st.subheader("Gerenciar Categorias")
-            col1, col2 = st.columns(2)
-            with col1:
-                tipo_cat = st.selectbox("Tipo de Categoria", ["entrada", "saida"], key="adm_tipo_cat")
-            with col2:
-                nova_cat = st.text_input("Nova Categoria", key="adm_nova_cat")
-            if st.button("Adicionar Categoria", key="btn_add_cat"):
-                if nova_cat:
-                    adicionar_categoria(nova_cat, tipo_cat)
-                    st.success("✅ Categoria adicionada!")
-                else:
-                    st.error("Digite o nome da categoria.")
-
-        with selected_tab[3]:
-            st.subheader("Usuários cadastrados")
-            conn = get_connection()
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, nome, email, admin FROM usuarios")
-            rows = cursor.fetchall()
-            conn.close()
-            df_users = pd.DataFrame([dict(r) for r in rows])
-            st.dataframe(df_users)
-
-    if st.button("Logout"):
-        st.session_state.usuario = None
-        st.session_state.logado = False
-
-# ---------------------------
-# Configuração inicial Streamlit
-# ---------------------------
-st.set_page_config(page_title="Contabilidade MEI", layout="wide")
-st.title("📊 Contabilidade MEI - Dashboard Financeiro")
-
-# Inicialização de variáveis de sessão
+# =====================================
+# 🚀 Execução principal
+# =====================================
 if "usuario" not in st.session_state:
-    st.session_state.usuario = None
-if "logado" not in st.session_state:
-    st.session_state.logado = False
-
-# ---------------------------
-# Fluxo principal
-# ---------------------------
-if st.session_state.logado:
-    tela_principal()
+    tela_login()
 else:
-    menu = st.sidebar.selectbox("Menu", ["Login", "Cadastrar"])
-    if menu == "Cadastrar":
-        tela_cadastro()
-    else:
-        tela_login()
-
-
+    tela_principal()
