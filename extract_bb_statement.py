@@ -6,12 +6,10 @@ def extract_bb_statement(markdown_content):
     transactions = []
     current_date = None
 
-    # Regex para linhas de transação com data — agora aceita linhas com ou sem '|'
     transaction_pattern_bb = re.compile(
         r'^\s*\|?\s*(\d{2}/\d{2}/\d{4})\s*\|?.*?\|?\s*(.*?)\s*\|?.*?\|?\s*([\d\.,]+)\s*([CD])'
     )
 
-    # Regex para linhas de transação sem data explícita — também aceita sem '|'
     transaction_pattern_bb_no_date = re.compile(
         r'^\s*\|?.*?\|?\s*(.*?)\s*\|?.*?\|?\s*([\d\.,]+)\s*([CD])'
     )
@@ -29,7 +27,6 @@ def extract_bb_statement(markdown_content):
                 value *= -1
             transactions.append({'Data': current_date, 'Histórico': description, 'Valor': value})
         else:
-            # Tenta encontrar transações sem data explícita na linha, usando a última data conhecida
             match_bb_no_date = transaction_pattern_bb_no_date.search(line)
             if match_bb_no_date and current_date:
                 description = match_bb_no_date.group(1).strip()
@@ -40,7 +37,6 @@ def extract_bb_statement(markdown_content):
                     value *= -1
                 transactions.append({'Data': current_date, 'Histórico': description, 'Valor': value})
 
-    df = pd.DataFrame(transactions)
-    return df
+    return pd.DataFrame(transactions)
 
 
