@@ -1,3 +1,6 @@
 streamlit
 pandas
-docling
+pydantic
+google-generativeai
+pypdf
+pdfplumber
